@@ -1,67 +1,115 @@
-// cleanWorkspace.groovy
+@Library('Jenkins_shared_library') _  #name used in jenkins system for library
+pipeline{
+    agent any
+    parameters {
+        choice(name: 'action', choices: 'create\ndelete', description: 'Select create or destroy.')
+    }
+    environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+    stages{
+        stage('clean workspace'){
+            steps{
+                cleanWorkspace()
+            }
+        }
+    stage('checkout from Git'){
+            steps{
+                checkoutGit('https://github.com/Aj7Ay/Youtube-clone-app.git', 'main')
+            }
+        }
+    stage('sonarqube Analysis'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                sonarqubeAnalysis()
+            }
+        }
+    stage('sonarqube QualitGate'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                script{
+                    def credentialsId = 'Sonar-token'
+                    qualityGate(credentialsId)
+                }
+            }
+        }
+    stage('Npm'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                npmInstall()
+            }
+        }
+    stage('Trivy file scan'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                trivyFs()
+            }
+        }
+    stage('OWASP FS SCAN') {
+        when { expression { params.action == 'create'}}
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+    #add inside parameter
+    string(name: 'DOCKER_HUB_USERNAME', defaultValue: 'sevenajay', description: 'Docker Hub Username')
+    string(name: 'IMAGE_NAME', defaultValue: 'youtube', description: 'Docker Image Name')
+    #stage
+    stage('Docker Build'){
+            when { expression { params.action == 'create'}}    
+            steps{
+                script{
+                   def dockerHubUsername = params.DOCKER_HUB_USERNAME
+                   def imageName = params.IMAGE_NAME
 
-def cleanWorkspace() {
-    cleanWs()
-}
-
-def checkoutGit(String gitUrl, String gitBranch) {
-    checkout([
-        $class: 'GitSCM',
-        branches: [[name: gitBranch]],
-        userRemoteConfigs: [[url: gitUrl]]
-    ])
-}
-
-def runSonarQubeAnalysis() {
-    withSonarQubeEnv('sonar-server') {
-        sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Youtube -Dsonar.projectKey=Youtube'''
+                   dockerBuild(dockerHubUsername, imageName)
+                }
+            }
+        }
+        stage('Trivy iamge'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                trivyImage()
+            }
+        }
+        stage('Run container'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                runContainer()
+            }
+        }
+        stage('Remove container'){
+        when { expression { params.action == 'delete'}}    
+            steps{
+                removeContainer()
+            }
+        }
+      stage('Kube deploy'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                kubeDeploy()
+            }
+        }
+        stage('kube deleter'){
+        when { expression { params.action == 'delete'}}    
+            steps{
+                kubeDelete()
+            }
+        }
+        stage('Kube deploy'){
+        when { expression { params.action == 'create'}}    
+            steps{
+                kubeDeploy()
+            }
+        }
+        stage('kube deleter'){
+        when { expression { params.action == 'delete'}}    
+            steps{
+                kubeDelete()
+            }
+        }
     }
 }
 
-def waitForQualityGate(String credentialsId) {
-    waitForQualityGate(abortPipeline: false, credentialsId: credentialsId)
-}
-
-def installNpmPackages() {
-    sh 'npm install'
-}
-
-def runTrivyFsScan() {
-    sh 'trivy fs . > trivyfs.txt'
-}
-
-def buildAndPushDockerImage(String dockerHubUsername, String imageName) {
-    // Build the Docker image
-    sh "docker build --build-arg REACT_APP_RAPID_API_KEY=f0ead79813mshb0aa -t ${imageName} ."
-    // Tag the Docker image
-    sh "docker tag ${imageName} ${dockerHubUsername}/${imageName}:latest"
-    // Push the Docker image
-    withDockerRegistry([url: 'https://index.docker.io/v1/', credentialsId: 'docker']) {
-        sh "docker push ${dockerHubUsername}/${imageName}:latest"
-    }
-}
-
-def runTrivyImageScan() {
-    sh 'trivy image sevenajay/youtube:latest > trivyimage.txt'
-}
-
-def startDockerContainer() {
-    sh "docker run -d --name youtube1 -p 3000:3000 sevenajay/youtube:latest"
-}
-
-def stopAndRemoveDockerContainer() {
-    sh 'docker stop youtube1'
-    sh 'docker rm youtube1'
-}
-
-def applyKubernetesDeployment() {
-    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
-        sh "kubectl apply -f deployment.yml"
-    }
-}
-
-def deleteKubernetesDeployment() {
-    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
-        sh "kubectl delete -f deployment.yml"
-    }
-}
+     
